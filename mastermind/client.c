@@ -238,7 +238,7 @@ void display_result(uint8_t result) {
   red = result & 7;
   white = (result >> 3) & 7;
 
-  printf("\t%d red - %d white\n", red, white);
+  printf("\tAnswer: %d red / %d white\n", red, white);
 }
 
 /** main function */
@@ -261,7 +261,7 @@ int main(int argc, char *argv[]) {
     DEBUG("\tSent 0x%x", next_offer);
 
     recv(connfd, &read_buffer, 1, 0);
-    DEBUG(" - Got byte 0x%x\n", read_buffer);
+    DEBUG(" - Received 0x%x\n", read_buffer);
     display_result(read_buffer);
 
     // Check buffer errors
@@ -282,7 +282,7 @@ int main(int argc, char *argv[]) {
 
     // Check if game is won
     if ((read_buffer & 7) == 5 ) {
-      printf("\nYou win in round: %d)\n", attempt);
+      printf("\nYou win in round: %d\n", attempt);
       return 0;
     }
 

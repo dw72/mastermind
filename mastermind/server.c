@@ -364,7 +364,7 @@ int main(int argc, char *argv[]) {
       bye(EXIT_FAILURE, "read_from_client");
     }
     request = (buffer[1] << 8) | buffer[0];
-    DEBUG("Round %-2d - Received 0x%x [%s]", attempt, request, int2bin(request, NULL));
+    DEBUG("Round %-2d: Received 0x%-5x [%s]", attempt, request, int2bin(request, NULL));
 
     // Compute the answer
     correct = compute_answer(request, buffer, options.secret);
@@ -373,7 +373,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Send answer to client
-    DEBUG(" - Sending byte 0x%x [%s]\n", buffer[0], int2bin(buffer[0], NULL));
+    DEBUG(" - Sending 0x%-3x [%s]\n", buffer[0], int2bin(buffer[0], NULL));
     int bytes_sent = 0;
     int s = 0;
     do {
