@@ -28,6 +28,9 @@
 /* === Constants === */
 
 #define SLOTS (5)
+#define READ_BYTES (1)
+#define WRITE_BYTES (2)
+
 
 /* === Type Definitions === */
 
@@ -52,12 +55,12 @@ static void terminate()
   }
 }
 
-static void bye(int eval, const char *offer, ...) {
+static void bye(int eval, const char *msg, ...) {
   va_list ap;
 
-  if (offer != NULL) {
-    va_start(ap, offer);
-    vfprintf(stderr, offer, ap);
+  if (msg != NULL) {
+    va_start(ap, msg);
+    vfprintf(stderr, msg, ap);
     va_end(ap);
   }
 
@@ -87,7 +90,6 @@ static void parse_args(int argc, char **argv, struct opts *options) {
   port = argv[2];
 
   errno = 0;
-  options->port = strtol(port, &endptr, 10);
   options->port = strtol(port, &endptr, 10);
   if ((errno == ERANGE && (options->port == LONG_MAX || options->port == LONG_MIN))
     || (errno != 0 && options->port == 0)) {
@@ -255,12 +257,12 @@ int main(int argc, char *argv[]) {
 
   do {
     attempt++;
-    DEBUG("Round %d:\n", attempt);
+    fprintf(stdout, "Round %d:\n", attempt);
     next_offer = get_next_offer();
-    send(connfd, &next_offer, 2, 0);
+    send(connfd, &next_offer, WRITE_BYTES, 0);
     DEBUG("\tSent 0x%x", next_offer);
 
-    recv(connfd, &read_buffer, 1, 0);
+    recv(connfd, &read_buffer, READ_BYTES, 0);
     DEBUG(" - Received 0x%x\n", read_buffer);
     display_result(read_buffer);
 

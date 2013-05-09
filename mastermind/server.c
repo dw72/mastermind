@@ -339,7 +339,7 @@ int main(int argc, char *argv[]) {
     bye(EXIT_FAILURE, "bind");
   }
 
-  printf("Waiting for client... ");
+  fprintf(stdout, "Waiting for client... ");
   if (listen(sockfd, BACKLOG) < 0) {
     bye(EXIT_FAILURE, "listen");
   }
