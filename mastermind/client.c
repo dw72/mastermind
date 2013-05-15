@@ -1,9 +1,8 @@
 /*
  * MISTERMIND Client
  *
- * Usage: client (<hostname> | <ip>) <port>
+ * Skladnia: client (<komputer> | <ip>) <port>
  *
- * Copyright (c) 2013 piniu
  */
 
 #define ENDEBUG
@@ -25,42 +24,42 @@
 #define DEBUG(...)
 #endif
 
-/* === Constants === */
+/* === Stale === */
 
-#define SLOTS (5)
-#define READ_BYTES (1)
-#define WRITE_BYTES (2)
+#define ILE_POZYCJI (5)
+#define CZYTAJ_BAJTY (1)
+#define PISZ_BAJTY (2)
 
 
-/* === Type Definitions === */
+/* === Typy === */
 
-struct opts {
+struct parametry {
   char *host;
   long int port;
 };
 
-/* === Global Variables === */
+/* === Zmienne === */
 
-static const char *progname = "server";
-static int connfd = -1; // connection socket file descriptor
-int attempt = 0;
+static const char *nazwaProgramu = "server";
+static int polaczenie = -1; // desktryptor polaczenia
+int proba = 0;
 enum { black, darkblue, green, orange, red, silver, violet, white };
 
-/* === Implementations === */
+/* === Implementacja === */
 
-static void terminate()
+static void zwolnijZasoby()
 {
-  if(connfd >= 0) {
-    close(connfd);
+  if(polaczenie >= 0) {
+    close(polaczenie);
   }
 }
 
-static void bye(int eval, const char *msg, ...) {
+static void zakoncz(int kodWyjscia, const char *komunikat, ...) {
   va_list ap;
 
-  if (msg != NULL) {
-    va_start(ap, msg);
-    vfprintf(stderr, msg, ap);
+  if (komunikat != NULL) {
+    va_start(ap, komunikat);
+    vfprintf(stderr, komunikat, ap);
     va_end(ap);
   }
 
@@ -70,221 +69,216 @@ static void bye(int eval, const char *msg, ...) {
 
   fprintf(stderr, "\n");
 
-  terminate();
-  exit(eval);
+  zwolnijZasoby();
+  exit(kodWyjscia);
 }
 
-static void parse_args(int argc, char **argv, struct opts *options) {
+static void czytajArgumenty(int argc, char **argv, struct parametry *param) {
 
   char *host, *port, *endptr;
 
   if (argc > 0) {
-    progname = argv[0];
+    nazwaProgramu = argv[0];
   }
 
   if (argc < 3) {
-    bye(EXIT_FAILURE, "Usage: %s (<hostname> | <ip>) <port>\n", progname);
+    zakoncz(EXIT_FAILURE, "Skladnia: %s (<komputer> | <ip>) <port>\n", nazwaProgramu);
   }
 
   host = argv[1];
   port = argv[2];
 
   errno = 0;
-  options->port = strtol(port, &endptr, 10);
-  if ((errno == ERANGE && (options->port == LONG_MAX || options->port == LONG_MIN))
-    || (errno != 0 && options->port == 0)) {
-    bye(EXIT_FAILURE, "strtol");
+  param->port = strtol(port, &endptr, 10);
+  if ((errno == ERANGE && (param->port == LONG_MAX || param->port == LONG_MIN))
+    || (errno != 0 && param->port == 0)) {
+    zakoncz(EXIT_FAILURE, "strtol");
   }
 
-  if (endptr == port) {
-    bye(EXIT_FAILURE, "No digits were found in <port>");
-  }
-
-  if (*endptr != '\0') {
-    bye(EXIT_FAILURE, "Further characters after <port>: %s", endptr);
-  }
-
-  if (options->port < 1 || options->port > 65535)
+  if (param->port < 1 || param->port > 65535)
   {
-    bye(EXIT_FAILURE, "Use a valid TCP/IP port range (1-65535)");
+    zakoncz(EXIT_FAILURE, "Uzyj poprawnego zakresu portow (1-65535)");
   }
 
-  options->host = host; // TODO: Think about some checks of hostname or ip
+  param->host = host;
 }
 
-int create_connection(const char *hostname, const int port)
+int tworzPolaczenie(const char *komputer, const int port)
 {
-  int sock, success = 0;
+  int gniazdo, sukces = 0;
   char port_string[6];
 
   sprintf(port_string, "%i", port);
 
-  struct addrinfo hints;
-  struct addrinfo *result;
-  memset(&hints, 0, sizeof(struct addrinfo));
-  hints.ai_flags = 0;
-  hints.ai_family = AF_INET; // IPv4 only
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_protocol = IPPROTO_TCP;
-  hints.ai_addrlen = 0;
-  hints.ai_addr = NULL;
-  hints.ai_canonname = NULL;
-  hints.ai_next = NULL;
+  struct addrinfo wejscie;
+  struct addrinfo *wynik;
+  memset(&wejscie, 0, sizeof(struct addrinfo));
+  wejscie.ai_flags = 0;
+  wejscie.ai_family = AF_INET;
+  wejscie.ai_socktype = SOCK_STREAM;
+  wejscie.ai_protocol = IPPROTO_TCP;
+  wejscie.ai_addrlen = 0;
+  wejscie.ai_addr = NULL;
+  wejscie.ai_canonname = NULL;
+  wejscie.ai_next = NULL;
 
-  if (getaddrinfo(hostname, port_string, &hints, &result) < 0) {
-    bye(EXIT_FAILURE, "getaddrinfo");
+  if (getaddrinfo(komputer, port_string, &wejscie, &wynik) < 0) {
+    zakoncz(EXIT_FAILURE, "getaddrinfo");
   }
 
-  struct addrinfo *ai_head = result;
+  struct addrinfo *ai_head = wynik;
 
-  if (result == NULL) {
-    bye(EXIT_FAILURE, "Address infromation is empty");
+  if (wynik == NULL) {
+    zakoncz(EXIT_FAILURE, "Brak informacji o adresie");
   }
 
   do {
-    sock = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-    if (sock >= 0) {
-      if (connect(sock, result->ai_addr, result->ai_addrlen) >= 0){
-        success = 1;
+    gniazdo = socket(wynik->ai_family, wynik->ai_socktype, wynik->ai_protocol);
+    if (gniazdo >= 0) {
+      if (connect(gniazdo, wynik->ai_addr, wynik->ai_addrlen) >= 0){
+        sukces = 1;
         break;
       }
     }
-  } while ((result = result->ai_next) != NULL);
+  } while ((wynik = wynik->ai_next) != NULL);
 
   freeaddrinfo(ai_head);
 
-  if (success == 0) {
-    bye(EXIT_FAILURE, "No valid socket");
+  if (sukces == 0) {
+    zakoncz(EXIT_FAILURE, "Brak prawidlowego gniazda");
   }
 
-  return sock;
+  return gniazdo;
 }
 
-uint16_t get_next_offer() {
+uint16_t pobierzKombinacje() {
 
-  uint16_t selected_colors;
-  char offer[50];
-  int len;
-  int isok;
+  uint16_t wybraneKolory;
+  char kombinacja[50];
+  int dlugosc;
+  int jestOK;
   int i;
 
-  // Read tip from user
-  printf("\tEnter your tip (%d chars from [bdgorsvw]): ", SLOTS);
+  // Czytaj kombinacje uzytownika
+  printf("\tWprowadz kombinacje (%d znakow z mozliwych [bdgorsvw]): ", ILE_POZYCJI);
   do {
-    isok = 1;
-    bzero(offer, sizeof(offer));
-    fscanf(stdin, "%s", offer);
+    jestOK = 1;
+    bzero(kombinacja, sizeof(kombinacja));
+    fscanf(stdin, "%s", kombinacja);
 
-    len = strlen(offer);
-    if (len != 5) {
-      printf("\tYou entered %d chars! Repeat: ", len);
-      isok = 0;
+    dlugosc = strlen(kombinacja);
+    if (dlugosc != 5) {
+      printf("\tWprowadzone znaki: %d! Powtorz: ", dlugosc);
+      jestOK = 0;
       continue;
     }
 
-    // Process it
-    selected_colors = 0x0000;
-    for (i = 0; i < strlen(offer); i++) {
-      uint8_t color;
-      switch (offer[i]) {
+    // Przetwarzaj kolory
+    wybraneKolory = 0x0000;
+    for (i = 0; i < strlen(kombinacja); i++) {
+      uint8_t kolor;
+      switch (kombinacja[i]) {
         case 'b': // 0
-          color = black;
+          kolor = black;
           break;
         case 'd': // 1
-          color = darkblue;
+          kolor = darkblue;
           break;
         case 'g': // 2
-          color = green;
+          kolor = green;
           break;
         case 'o': // 3
-          color = orange;
+          kolor = orange;
           break;
         case 'r': // 4
-          color = red;
+          kolor = red;
           break;
         case 's': // 5
-          color = silver;
+          kolor = silver;
           break;
         case 'v': // 6
-          color = violet;
+          kolor = violet;
           break;
         case 'w': // 7
-          color = white;
+          kolor = white;
           break;
         default:
-          fprintf(stderr, "\tBad Color '%c' in your offer! Repeat: ", offer[i]);
-          isok = 0;
+          fprintf(stderr, "\tZly kolor '%c' w twojej kombinacji! Powtorz: ", kombinacja[i]);
+          jestOK = 0;
       }
-      if (isok == 0) {
+      if (jestOK == 0) {
         break;
       } else {
-        selected_colors += (color << (i * 3));
+        wybraneKolory += (kolor << (i * 3));
       }
     }
   }
-  while (isok == 0);
+  while (jestOK == 0);
 
-  // Set parity bit
-  uint16_t parity = 0;
+  // Ustawienie bitu parzystosci
+  uint16_t parzystosc = 0;
   for (i = 0; i < 15; i++) {
-    parity ^= (selected_colors % (1 << (i+1))) >> i;
+    parzystosc ^= (wybraneKolory % (1 << (i+1))) >> i;
   }
-  parity <<= 15;
+  parzystosc <<= 15;
 
-  return selected_colors | parity;
+  return wybraneKolory | parzystosc;
 }
 
-void display_result(uint8_t result) {
-  int red, white;
+void wyswietlWynik(uint8_t wynik) {
+  int czerwone, biale;
 
-  red = result & 7;
-  white = (result >> 3) & 7;
+  czerwone = wynik & 7;
+  biale = (wynik >> 3) & 7;
 
-  printf("\tAnswer: %d red / %d white\n", red, white);
+  printf("\tOdpowiedz: %d czerwone / %d biale\n", czerwone, biale);
 }
 
-/** main function */
+
+
+
+
 int main(int argc, char *argv[]) {
 
-  struct opts options;
+  struct parametry param;
 
-  parse_args(argc, argv, &options);
+  czytajArgumenty(argc, argv, &param);
 
-  connfd = create_connection(argv[1], options.port);
+  polaczenie = tworzPolaczenie(argv[1], param.port);
 
-  uint8_t read_buffer;
-  uint16_t next_offer;
+  uint8_t buforOdczytu;
+  uint16_t nowaKombinacja;
 
   do {
-    attempt++;
-    fprintf(stdout, "Round %d:\n", attempt);
-    next_offer = get_next_offer();
-    send(connfd, &next_offer, WRITE_BYTES, 0);
-    DEBUG("\tSent 0x%x", next_offer);
+    proba++;
+    fprintf(stdout, "Runda %d:\n", proba);
+    nowaKombinacja = pobierzKombinacje();
+    send(polaczenie, &nowaKombinacja, PISZ_BAJTY, 0);
+    DEBUG("\tWyslano 0x%x", nowaKombinacja);
 
-    recv(connfd, &read_buffer, READ_BYTES, 0);
-    DEBUG(" - Received 0x%x\n", read_buffer);
-    display_result(read_buffer);
+    recv(polaczenie, &buforOdczytu, CZYTAJ_BAJTY, 0);
+    DEBUG(" - Odebrano 0x%x\n", buforOdczytu);
+    wyswietlWynik(buforOdczytu);
 
-    // Check buffer errors
+    // Obsluga bledow bufora
     errno = 0;
-    switch (read_buffer >> 6) {
+    switch (buforOdczytu >> 6) {
       case 1:
-        fprintf(stderr, "Parity error\n");
+        fprintf(stderr, "Blad parzystosci\n");
         return 2;
       case 2:
-        fprintf(stderr, "You loose\n");
+        fprintf(stderr, "Przegrales\n");
         return 3;
       case 3:
-        fprintf(stderr, "Parity error AND game lost, d'oh!\n");
+        fprintf(stderr, "Blad parzystosci i przegrales, d'niestety!\n");
         return 4;
       default:
         break;
     }
 
-    // Check if game is won
-    if ((read_buffer & 7) == 5 ) {
-      printf("\nYou win in round: %d\n", attempt);
+    // Sprawdz czy wygrana
+    if ((buforOdczytu & 7) == 5 ) {
+      printf("\nWygrales w rundzie: %d\n", proba);
       return 0;
     }
 

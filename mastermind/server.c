@@ -1,12 +1,7 @@
 /*
  * MISTERMIND Server
  *
- * Usage: server <port> <secret>
- *
- * Colors to use in secret (first letters):
- * [b]lack, [d]arkblue, [g]reen, [o]range, [r]ed, [s]ilver, [v]iolet, [w]hite
- *
- * Copyright (c) 2013 piniu
+ * Skladnia: server <port> <kombinacja>
  */
 
 #define ENDEBUG
@@ -30,161 +25,161 @@
 #define DEBUG(...)
 #endif
 
-/* === Constants === */
+/* === Stale === */
 
-#define MAX_TRIES (10)
-#define SLOTS (5)
-#define COLORS (8)
+#define ILOSC_PROB (10)
+#define ILOSC_POZYCJI (5)
+#define MAX_LICZBA_KOLOROW (8)
 
-#define READ_BYTES (2)
-#define WRITE_BYTES (1)
-#define BUFFER_BYTES (2)
-#define SHIFT_WIDTH (3)
-#define PARITY_ERR_BIT (6)
-#define GAME_LOST_ERR_BIT (7)
+#define CZYTAJ_BAJTY (2)
+#define PISZ_BAJTY (1)
+#define BUFOR_BAJTY (2)
+#define PRZESUN_BITY (3)
+#define PARZYSTOSC_BIT (6)
+#define PRZEGRANA_BIT (7)
 
-#define EXIT_PARITY_ERROR (2)
-#define EXIT_GAME_LOST (3)
-#define EXIT_MULTIPLE_ERRORS (4)
+#define EXIT_BLAD_PARZYSTOSCI (2)
+#define EXIT_PRZEGRANA (3)
+#define EXIT_PRZEGRANA_BLAD (4)
 
-#define BACKLOG (5)
+#define INFORMACJA_ZWROTNA (5)
 
-/* === Type Definitions === */
+/* === Typy === */
 
-struct opts {
+struct parametry {
   long int port;
-  uint8_t secret[SLOTS];
+  uint8_t kombinacja[ILOSC_POZYCJI];
 };
 
-/* === Global Variables === */
+/* === Zmienne === */
 
-static const char *progname = "server";
-volatile sig_atomic_t terminated = 0; // cleanup performed
-static int sockfd = -1; // server socket file descriptor
-static int connfd = -1; // connection socket file descriptor
+static const char *nazwaProgramu = "server";
+volatile sig_atomic_t zwolnionoZasoby = 0;
+static int gniazdo = -1; // nasluchu serwera
+static int polaczenie = -1; // od klienta
 
-/* === Implementations === */
+/* === Implementacja === */
 
-static uint8_t *read_from_client(int fd, uint8_t *buffer, size_t n)
+static uint8_t *czytajDane(int fd, uint8_t *bufor, size_t n)
 {
-  /* loop, as packet can arrive in several partial reads */
-  size_t bytes_recv = 0;
+  /* Powtarzaj dopoki nadchodza dane */
+  size_t odebraneBajty = 0;
   do {
     ssize_t r;
-    r = read(fd, buffer + bytes_recv, n - bytes_recv);
+    r = read(fd, bufor + odebraneBajty, n - odebraneBajty);
     if (r <= 0) {
       return NULL;
     }
-    bytes_recv += r;
-  } while (bytes_recv < n);
+    odebraneBajty += r;
+  } while (odebraneBajty < n);
 
-  if (bytes_recv < n) {
+  if (odebraneBajty < n) {
     return NULL;
   }
-  return buffer;
+  return bufor;
 }
 
 char *int2bin(unsigned n, char *buf)
 {
-    #define BITS (sizeof(n) * CHAR_BIT)
+    #define BITY (sizeof(n) * CHAR_BIT)
 
-    static char static_buf[BITS + 1];
+    static char bin_string[BITY + 1];
     int i;
 
     if (buf == NULL)
-        buf = static_buf;
+        buf = bin_string;
 
-    for (i = BITS - 1; i >= 0; --i) {
+    for (i = BITY - 1; i >= 0; --i) {
         buf[i] = (n & 1) ? '1' : '0';
         n >>= 1;
     }
 
-    buf[BITS] = '\0';
+    buf[BITY] = '\0';
     return buf;
 
-    #undef BITS
+    #undef BITY
 }
 
-static int compute_answer(uint16_t req, uint8_t *resp, uint8_t *secret)
+static int obliczOdpowiedz(uint16_t zadanie, uint8_t *odpowiedz, uint8_t *kombinacja)
 {
-  int colors_left[COLORS];
-  int guess[COLORS];
-  uint8_t parity_calc, parity_recv;
-  int red, white;
+  int pozostaleKolory[MAX_LICZBA_KOLOROW];
+  int prawidloweKolory[MAX_LICZBA_KOLOROW];
+  uint8_t parzystoscObliczona, parzystoscOdebrana;
+  int czerwone, biale;
   int j;
 
-  parity_recv = (req >> 15) & 1;
+  parzystoscOdebrana = (zadanie >> 15) & 1;
 
-  // extract the guess and calculate parity
-  parity_calc = 0;
-  for (j = 0; j < SLOTS; ++j) {
-    int tmp = req & 0x7;
-    parity_calc ^= tmp ^ (tmp >> 1) ^ (tmp >> 2);
-    guess[j] = tmp;
-    req >>= SHIFT_WIDTH;
+  // wyodrebnij prawidloweKolory i oblicz parzystosc
+  parzystoscObliczona = 0;
+  for (j = 0; j < ILOSC_POZYCJI; ++j) {
+    int tmp = zadanie & 0x7;
+    parzystoscObliczona ^= tmp ^ (tmp >> 1) ^ (tmp >> 2);
+    prawidloweKolory[j] = tmp;
+    zadanie >>= PRZESUN_BITY;
   }
-  parity_calc &= 0x1;
+  parzystoscObliczona &= 0x1;
 
-  // marking red and white
-  memset(&colors_left[0], 0, sizeof(colors_left));
-  red = white = 0;
-  for (j = 0; j < SLOTS; ++j) {
-    // mark red
-    if (guess[j] == secret[j]) {
-      red++;
+  // policz czerwone i biale
+  memset(&pozostaleKolory[0], 0, sizeof(pozostaleKolory));
+  czerwone = biale = 0;
+  for (j = 0; j < ILOSC_POZYCJI; ++j) {
+    // policz czerwone
+    if (prawidloweKolory[j] == kombinacja[j]) {
+      czerwone++;
     } else {
-      colors_left[secret[j]]++;
+      pozostaleKolory[kombinacja[j]]++;
     }
   }
-  for (j = 0; j < SLOTS; ++j) {
-    // mark white for not marked red
-    if (guess[j] != secret[j]) {
-      if (colors_left[guess[j]] > 0) {
-        white++;
-        colors_left[guess[j]]--;
+  for (j = 0; j < ILOSC_POZYCJI; ++j) {
+    // policz jako biale jesli nie czerwone
+    if (prawidloweKolory[j] != kombinacja[j]) {
+      if (pozostaleKolory[prawidloweKolory[j]] > 0) {
+        biale++;
+        pozostaleKolory[prawidloweKolory[j]]--;
       }
     }
   }
 
-  // build response
-  resp[0] = red | (white << SHIFT_WIDTH);
-  if (parity_recv != parity_calc) {
-    resp[0] |= (1 << PARITY_ERR_BIT);
+  // buduj odpowiedz
+  odpowiedz[0] = czerwone | (biale << PRZESUN_BITY);
+  if (parzystoscOdebrana != parzystoscObliczona) {
+    odpowiedz[0] |= (1 << PARZYSTOSC_BIT);
     return -1;
   } else {
-    return red;
+    return czerwone;
   }
 }
 
-static void terminate()
+static void zwolnijZasoby()
 {
-  // signals need to be blocked here to avoid race
-  sigset_t blocked_signals;
-  sigfillset(&blocked_signals);
-  sigprocmask(SIG_BLOCK, &blocked_signals, NULL);
+  // musimy zablokowac sygnaly
+  sigset_t blokowaneSygnaly;
+  sigfillset(&blokowaneSygnaly);
+  sigprocmask(SIG_BLOCK, &blokowaneSygnaly, NULL);
 
-  if(terminated == 1) {
+  if(zwolnionoZasoby == 1) {
       return;
   }
-  terminated = 1;
+  zwolnionoZasoby = 1;
 
-  // clean up resources
-  DEBUG("Shutting down server\n");
-  if(connfd >= 0) {
-      close(connfd);
+  // zwolnij zasoby
+  DEBUG("Wylaczono serwer\n");
+  if(polaczenie >= 0) {
+      close(polaczenie);
   }
-  if(sockfd >= 0) {
-      close(sockfd);
+  if(gniazdo >= 0) {
+      close(gniazdo);
   }
 }
 
-static void bye(int eval, const char *msg, ...) {
+static void zakoncz(int kodWyjscia, const char *komunikat, ...) {
 
   va_list ap;
 
-  if (msg != NULL) {
-    va_start(ap, msg);
-    vfprintf(stderr, msg, ap);
+  if (komunikat != NULL) {
+    va_start(ap, komunikat);
+    vfprintf(stderr, komunikat, ap);
     va_end(ap);
   }
 
@@ -194,219 +189,214 @@ static void bye(int eval, const char *msg, ...) {
 
   fprintf(stderr, "\n");
 
-  terminate();
-  exit(eval);
+  zwolnijZasoby();
+  exit(kodWyjscia);
 }
 
-static void signal_handler(int sig)
+static void obsluzSygnal(int sig)
 {
-  DEBUG("\nCaught Signal\n");
-  terminate();
+  DEBUG("\nOdebrano sygnal\n");
+  zwolnijZasoby();
   exit(EXIT_SUCCESS);
 }
 
-static void set_signal_handlers() {
+static void ustawObslugeSygnalow() {
 
-  sigset_t block_signals;
+  sigset_t blokowaneSygnaly;
   int i;
 
-  if(sigfillset(&block_signals) < 0) {
-    bye(EXIT_FAILURE, "sigfillset");
+  if(sigfillset(&blokowaneSygnaly) < 0) {
+    zakoncz(EXIT_FAILURE, "sigfillset");
   }
   else {
-    const int signals[] = { SIGINT, SIGQUIT, SIGTERM }; // Only these are valid
+    const int obsluzSygnaly[] = { SIGINT, SIGQUIT, SIGTERM };
     struct sigaction s;
-    s.sa_handler = signal_handler;
-    memcpy(&s.sa_mask, &block_signals, sizeof(s.sa_mask));
+    s.sa_handler = obsluzSygnal;
+    memcpy(&s.sa_mask, &blokowaneSygnaly, sizeof(s.sa_mask));
     s.sa_flags = SA_RESTART;
-    int signals_count = sizeof(signals)/sizeof(signals[0]);
-    for(i = 0; i < signals_count; i++) {
-      if (sigaction(signals[i], &s, NULL) < 0) {
-        bye(EXIT_FAILURE, "sigaction");
+    int iloscObslugiwanych = sizeof(obsluzSygnaly)/sizeof(obsluzSygnaly[0]);
+    for(i = 0; i < iloscObslugiwanych; i++) {
+      if (sigaction(obsluzSygnaly[i], &s, NULL) < 0) {
+        zakoncz(EXIT_FAILURE, "sigaction");
       }
     }
   }
 }
 
-static void parse_args(int argc, char **argv, struct opts *options) {
+static void czytajArgumenty(int argc, char **argv, struct parametry *param) {
 
   char *port;
-  char *secret;
+  char *kombinacja;
   char *endptr;
   int i;
   enum { black, darkblue, green, orange, red, silver, violet, white };
 
   if (argc > 0) {
-    progname = argv[0];
+    nazwaProgramu = argv[0];
   }
 
   if (argc < 3) {
-    bye(EXIT_FAILURE, "Usage: %s <port> <sequence>\n", progname);
+    zakoncz(EXIT_FAILURE, "Skladnia: %s <port> <kombinacja>\n", nazwaProgramu);
   }
 
   port = argv[1];
-  secret = argv[2];
+  kombinacja = argv[2];
 
   errno = 0;
-  options->port = strtol(port, &endptr, 10);
-  if ((errno == ERANGE && (options->port == LONG_MAX || options->port == LONG_MIN))
-    || (errno != 0 && options->port == 0)) {
-    bye(EXIT_FAILURE, "strtol");
+  param->port = strtol(port, &endptr, 10);
+  if ((errno == ERANGE && (param->port == LONG_MAX || param->port == LONG_MIN))
+    || (errno != 0 && param->port == 0)) {
+    zakoncz(EXIT_FAILURE, "strtol");
   }
 
-  if (endptr == port) {
-    bye(EXIT_FAILURE, "No digits were found in <port>");
-  }
-
-  if (*endptr != '\0') {
-    bye(EXIT_FAILURE, "Further characters after <port>: %s", endptr);
-  }
-
-  if (options->port < 1 || options->port > 65535)
+  if (param->port < 1 || param->port > 65535)
   {
-    bye(EXIT_FAILURE, "Use a valid TCP/IP port range (1-65535)");
+    zakoncz(EXIT_FAILURE, "Uzyj poprawnego zakresu portow (1-65535)");
   }
 
-  if (strlen(secret) != SLOTS) {
-    bye(EXIT_FAILURE, "<secret> has to be %d chars long", SLOTS);
+  if (strlen(kombinacja) != ILOSC_POZYCJI) {
+    zakoncz(EXIT_FAILURE, "Ilosc znakow w <kombinacja> powinna wynosic: %d", ILOSC_POZYCJI);
   }
 
-  /* read secret */
-  for (i = 0; i < SLOTS; ++i) {
-    uint8_t color;
-    switch (secret[i]) {
+  /* czytaj kombinacje */
+  for (i = 0; i < ILOSC_POZYCJI; ++i) {
+    uint8_t kolor;
+    switch (kombinacja[i]) {
     case 'b':
-      color = black;
+      kolor = black;
       break;
     case 'd':
-      color = darkblue;
+      kolor = darkblue;
       break;
     case 'g':
-      color = green;
+      kolor = green;
       break;
     case 'o':
-      color = orange;
+      kolor = orange;
       break;
     case 'r':
-      color = red;
+      kolor = red;
       break;
     case 's':
-      color = silver;
+      kolor = silver;
       break;
     case 'v':
-      color = violet;
+      kolor = violet;
       break;
     case 'w':
-      color = white;
+      kolor = white;
       break;
     default:
-      bye(EXIT_FAILURE, "Bad Color '%c' in <secret>\nMust be one of: " \
+      zakoncz(EXIT_FAILURE, "Zly kolor '%c' w <kombinacja>\nMusi byc jeden z: " \
                         "[b]lack, [d]arkblue, [g]reen, [o]range, [r]ed, " \
-                        "[s]ilver, [v]iolet, [w]hite", secret[i]);
+                        "[s]ilver, [v]iolet, [w]hite", kombinacja[i]);
     }
-    options->secret[i] = color;
+    param->kombinacja[i] = kolor;
   }
 }
 
-/** main function */
+
+
+
+
 
 int main(int argc, char *argv[]) {
 
-  struct opts options;
-  int attempt = 0;
-  int ret = 0;
+  struct parametry param;
+  int proba = 0;
+  int wynik = 0;
 
-  parse_args(argc, argv, &options);
-  set_signal_handlers();
+  czytajArgumenty(argc, argv, &param);
+  ustawObslugeSygnalow();
 
-  sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (sockfd < 0) {
-    bye(EXIT_FAILURE, "socket");
+  gniazdo = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (gniazdo < 0) {
+    zakoncz(EXIT_FAILURE, "socket");
   }
 
-  struct sockaddr_in server_address;
-  server_address.sin_family = AF_INET;
-  server_address.sin_port = htons(options.port);
-  server_address.sin_addr.s_addr = INADDR_ANY;
-  bzero(&server_address.sin_zero, sizeof(server_address.sin_zero));
+  struct sockaddr_in adresSerwera;
+  adresSerwera.sin_family = AF_INET;
+  adresSerwera.sin_port = htons(param.port);
+  adresSerwera.sin_addr.s_addr = INADDR_ANY;
+  bzero(&adresSerwera.sin_zero, sizeof(adresSerwera.sin_zero));
 
-  int one = 1;
-  if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0) {
-    bye(EXIT_FAILURE, "setsockopt SO_REUSEADDR");
+  int jeden = 1;
+  if (setsockopt(gniazdo, SOL_SOCKET, SO_REUSEADDR, &jeden, sizeof(jeden)) < 0) {
+    zakoncz(EXIT_FAILURE, "setsockopt SO_REUSEADDR");
   }
 
-  if (bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address)) < 0) {
-    bye(EXIT_FAILURE, "bind");
+  if (bind(gniazdo, (struct sockaddr *) &adresSerwera, sizeof(adresSerwera)) < 0) {
+    zakoncz(EXIT_FAILURE, "bind");
   }
 
-  fprintf(stdout, "Waiting for client... ");
-  if (listen(sockfd, BACKLOG) < 0) {
-    bye(EXIT_FAILURE, "listen");
+  fprintf(stdout, "Czekam na klienta... ");
+  if (listen(gniazdo, INFORMACJA_ZWROTNA) < 0) {
+    zakoncz(EXIT_FAILURE, "listen");
   }
 
-  struct sockaddr_in client_address;
-  socklen_t client_address_length = sizeof(client_address);
-  connfd = accept(sockfd, (struct sockaddr *) &client_address, &client_address_length);
-  if (connfd < 0) {
-    bye(EXIT_FAILURE, "Error on accept");
+  struct sockaddr_in adresKlienta;
+  socklen_t adresKlienta_length = sizeof(adresKlienta);
+  polaczenie = accept(gniazdo, (struct sockaddr *) &adresKlienta, &adresKlienta_length);
+  if (polaczenie < 0) {
+    zakoncz(EXIT_FAILURE, "accept");
   }
-  fprintf(stdout, "connected\n");
+  fprintf(stdout, "polaczony\n");
 
-  ret = EXIT_SUCCESS;
-  for (attempt = 1; attempt <= MAX_TRIES; ++attempt) {
-    uint16_t request;
-    static uint8_t buffer[BUFFER_BYTES];
-    int correct;
-    int error = 0;
+  wynik = EXIT_SUCCESS;
+  for (proba = 1; proba <= ILOSC_PROB; ++proba) {
+    uint16_t propozycja;
+    static uint8_t bufor[BUFOR_BAJTY];
+    int poprawne;
+    int blad = 0;
 
-    // Read data from client
-    if (read_from_client(connfd, &buffer[0], READ_BYTES) == NULL) {
-      bye(EXIT_FAILURE, "read_from_client");
+    // Czytaj dane od klienta
+    if (czytajDane(polaczenie, &bufor[0], CZYTAJ_BAJTY) == NULL) {
+      zakoncz(EXIT_FAILURE, "czytajDane");
     }
-    request = (buffer[1] << 8) | buffer[0];
-    DEBUG("Round %-2d: Received 0x%-5x [%s]", attempt, request, int2bin(request, NULL));
+    propozycja = (bufor[1] << 8) | bufor[0];
+    DEBUG("Runda %-2d: Odebrano 0x%-5x [%s]", proba, propozycja, int2bin(propozycja, NULL));
 
-    // Compute the answer
-    correct = compute_answer(request, buffer, options.secret);
-    if (attempt == MAX_TRIES && correct != SLOTS) {
-      buffer[0] |= 1 << GAME_LOST_ERR_BIT;
+    // Oblicz odpowiedz
+    poprawne = obliczOdpowiedz(propozycja, bufor, param.kombinacja);
+    if (proba == ILOSC_PROB && poprawne != ILOSC_POZYCJI) {
+      bufor[0] |= 1 << PRZEGRANA_BIT;
     }
 
-    // Send answer to client
-    DEBUG(" - Sending 0x%-3x [%s]\n", buffer[0], int2bin(buffer[0], NULL));
-    int bytes_sent = 0;
+    // wyslij odpowiedz
+    DEBUG(" - Wysylam 0x%-3x [%s]\n", bufor[0], int2bin(bufor[0], NULL));
+    int wyslaneBajty = 0;
     int s = 0;
     do {
-      s = write(connfd, buffer + bytes_sent, WRITE_BYTES - bytes_sent);
+      s = write(polaczenie, bufor + wyslaneBajty, PISZ_BAJTY - wyslaneBajty);
       if (s < 0) {
-        bye(EXIT_FAILURE, "send");
+        zakoncz(EXIT_FAILURE, "write");
       }
-      bytes_sent += s;
-    } while (bytes_sent < WRITE_BYTES);
+      wyslaneBajty += s;
+    } while (wyslaneBajty < PISZ_BAJTY);
 
-    // Check errors and if game is over
-    if (*buffer & (1<<PARITY_ERR_BIT)) {
-      fprintf(stderr, "Parity error\n");
-      error = 1;
-      ret = EXIT_PARITY_ERROR;
+    // Sprawdz bledy i czy gra zakonczona
+    if (*bufor & (1<<PARZYSTOSC_BIT)) {
+      fprintf(stderr, "Blad parzystosci\n");
+      blad = 1;
+      wynik = EXIT_BLAD_PARZYSTOSCI;
     }
-    if (*buffer & (1 << GAME_LOST_ERR_BIT)) {
-      fprintf(stderr, "Game lost\n");
-      error = 1;
-      if (ret == EXIT_PARITY_ERROR) {
-        ret = EXIT_MULTIPLE_ERRORS;
+    if (*bufor & (1 << PRZEGRANA_BIT)) {
+      fprintf(stderr, "Gra przegrana\n");
+      blad = 1;
+      if (wynik == EXIT_BLAD_PARZYSTOSCI) {
+        wynik = EXIT_PRZEGRANA_BLAD;
       } else {
-        ret = EXIT_GAME_LOST;
+        wynik = EXIT_PRZEGRANA;
       }
     }
-    if (error) {
+    if (blad) {
       break;
-    } else if (correct == SLOTS) {
-      printf("Client WIN (rounds: %d)\n", attempt);
+    } else if (poprawne == ILOSC_POZYCJI) {
+      printf("Klient wygral w rundzie: %d\n", proba);
       break;
     }
   }
 
-  terminate();
-  return ret;
+  zwolnijZasoby();
+  return wynik;
 }
