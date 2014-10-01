@@ -1,4 +1,4 @@
-trash
-=====
+mastermind
+==========
 
-Container for all shitty toys
+Simple mastermind game written as excercise for Piniu
